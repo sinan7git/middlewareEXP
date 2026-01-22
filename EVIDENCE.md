@@ -295,3 +295,162 @@ curl -X POST http://localhost:8000/api/replay/ABCD1234567/ \
 }
 ```
 
+---
+
+---
+
+## 9. OWNER CONFLICT QUARANTINE (REQUESTED EVIDENCE)
+
+### Step 1: Create container with OWNER_A
+```bash
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "CONFLICT001", "event_type": "GATE_IN", "container_no": "OWNE1234567", "owner_code": "OWNER_A"}'
+```
+**Response:**
+```json
+{
+    "success": true,
+    "event_id": "CONFLICT001",
+    "new_status": "GATE_IN",
+    "invoice": null
+}
+```
+
+### Step 2: Check container (owner is OWNER_A)
+```json
+{
+    "container_no": "OWNE1234567",
+    "owner_code": "OWNER_A",
+    "status": "GATE_IN",
+    "last_event_id": "CONFLICT001"
+}
+```
+
+### Step 3: Submit event with DIFFERENT owner (OWNER_B) - CONFLICT DETECTED
+```bash
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "CONFLICT002", "event_type": "INSPECTION", "container_no": "OWNE1234567", "owner_code": "OWNER_B"}'
+```
+**Response - QUARANTINED:**
+```json
+{
+    "success": false,
+    "error": "Owner conflict",
+    "quarantined": true
+}
+```
+
+### Step 4: Quarantine shows the conflict reason
+```json
+{
+    "event_id": "CONFLICT002",
+    "container_no": "OWNE1234567",
+    "reason": "Owner conflict: OWNER_B vs OWNER_A",
+    "status": "PENDING",
+    "event_data": {
+        "event_id": "CONFLICT002",
+        "event_type": "INSPECTION",
+        "container_no": "OWNE1234567",
+        "owner_code": "OWNER_B"
+    }
+}
+```
+
+### Step 5: Finance admin approves
+```bash
+curl -X POST http://localhost:8000/api/quarantine/CONFLICT002/approve/ \
+  -H "Authorization: Token $ADMIN_TOKEN"
+```
+**Response:**
+```json
+{
+    "success": true,
+    "event_id": "CONFLICT002",
+    "new_status": "INSPECTED",
+    "approved_by": "finance_admin1"
+}
+```
+
+### Step 6: Container updated after approval (owner changed to OWNER_B)
+```json
+{
+    "container_no": "OWNE1234567",
+    "owner_code": "OWNER_B",
+    "status": "INSPECTED",
+    "last_event_id": "CONFLICT002"
+}
+```
+
+---
+
+## 10. DUPLICATE WORK ORDER BILLING PREVENTION (REQUESTED EVIDENCE)
+
+### Step 1: Create container and submit WORK_ORDER
+```bash
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DUP001", "event_type": "GATE_IN", "container_no": "DUPL1234567", "owner_code": "OWNER_DUP"}'
+
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DUP002", "event_type": "INSPECTION", "container_no": "DUPL1234567"}'
+
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DUP003", "event_type": "WORK_ORDER", "container_no": "DUPL1234567", "payload": {"work_order_id": "WO-DUPLICATE-TEST", "amount": "350.00"}}'
+```
+**Response - Invoice created:**
+```json
+{
+    "success": true,
+    "event_id": "DUP003",
+    "new_status": "WORK_DONE",
+    "invoice": {
+        "invoice_ref": "INV-CAE12338",
+        "status": "PENDING"
+    }
+}
+```
+
+### Step 2: Invoice exists for WO-DUPLICATE-TEST
+```json
+{
+    "invoice_ref": "INV-CAE12338",
+    "container_no": "DUPL1234567",
+    "work_order_id": "WO-DUPLICATE-TEST",
+    "amount": "350.00",
+    "currency": "USD",
+    "status": "PENDING"
+}
+```
+
+### Step 3: Create DIFFERENT container, try to bill SAME work_order_id
+```bash
+curl -X POST ... '{"event_id": "DUP004", "event_type": "GATE_IN", "container_no": "SCND1234567", ...}'
+curl -X POST ... '{"event_id": "DUP005", "event_type": "INSPECTION", "container_no": "SCND1234567"}'
+
+curl -X POST http://localhost:8000/api/events/ \
+  -H "Authorization: Token $OP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DUP006", "event_type": "WORK_ORDER", "container_no": "SCND1234567", "payload": {"work_order_id": "WO-DUPLICATE-TEST", "amount": "500.00"}}'
+```
+**Response - BLOCKED:**
+```json
+{
+    "success": false,
+    "error": "Work order already billed",
+    "quarantined": false
+}
+```
+
+### Step 4: Verify only 1 invoice exists for WO-DUPLICATE-TEST
+Invoice count remains 3 (no duplicate created). WO-DUPLICATE-TEST appears only once.
+
+---
