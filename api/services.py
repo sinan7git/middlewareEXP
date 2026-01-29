@@ -139,6 +139,14 @@ def send_to_erp(invoice_ref):
         invoice = InvoiceReady.objects.get(invoice_ref=invoice_ref)
     except InvoiceReady.DoesNotExist:
         return {'success': False, 'error': 'Invoice not found'}
+
+    if invoice.status == 'SENT':
+        return {
+            'success': False,
+            'error': 'Invoice already sent to ERP',
+            'invoice_ref': invoice_ref,
+            'sent_at': invoice.updated_at.isoformat()
+        }
     
     max_retries = 3
     
